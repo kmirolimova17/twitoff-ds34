@@ -1,7 +1,9 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from .models import DB, User, Tweet
 from os import getenv
 from .twitter import add_or_update_user
+from .predict import predict_user
+
 
 def create_app():
 
@@ -11,49 +13,14 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = getenv('DATABASE_URI')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-    # Connect our database to the app object 
+    # Connect our database to the app object
     DB.init_app(app)
 
     @app.route("/")
     def home_page():
         # query for all users in the database
-        users = User.query.all()
-        return render_template('base.html', title='Home', users=users)
+        return render_template('base.html', title='Home', users=User.query.all())
 
-    @app.route('/populate')
-    # Test my database functionality 
-    # by inserting some fake data into the DB
-    def populate():
-
-        # Reset the DB first 
-        # remove everything from the DB
-        DB.drop_all()
-        # recreate User and Tweet tables
-        # so that they're ready to be used (inserted into)
-        DB.create_all()
-        
-        add_or_update_user('justordinary1_')
-        add_or_update_user('nasa')
-        add_or_update_user('euphoriaHBO')
-
-        # # Make two new users
-        # kamila = User(id=1, username='komilamirolimova')
-        # ryan = User(id=2, username='ryanallred')
-        # # Make two tweets
-        # tweet1 = Tweet(id=1, text="this is ryan's tweet", user=ryan)
-        # tweet2 = Tweet(id=2, text="this is kamila's tweet", user=kamila)
-
-        # # Inserting into the DB when working with SQLite directly
-        # DB.session.add(kamila)
-        # DB.session.add(ryan)
-        # DB.session.add(tweet2)
-        # DB.session.add(tweet1)
-
-        # # Commit the DB changes
-        # DB.session.commit()
-
-        return render_template('base.html', title='Populate')
-    
     @app.route('/update')
     # Test my database functionality
     # by inserting some fake data into the DB
@@ -75,10 +42,45 @@ def create_app():
         # recreate User and Tweet tables
         # so that they're ready to be used (inserted into)
         DB.create_all()
-        
+
         return render_template('base.html', title='Reset Database')
-    
+
+    # user route is a more traditional API endpoint
+    # This endpoint can only accept certain kinds of http requests.
+    @app.route('/user', methods=['POST'])
+    @app.route('/user/<username>', methods=['GET'])
+    def user(username=None, message=''):
+        username = username or request.values['user_name']
+        try:
+            if request.method == 'POST':
+                add_or_update_user(username)
+                message = f"User '{username}' has been successfully added!"
+            tweets = User.query.filter(User.username == username).one().tweets
+        except Exception as e:
+            message = f'Error adding {username}: {e}'
+            tweets = []
+
+        return render_template('user.html', title=username, tweets=tweets, message=message)
+
+    @app.route('/compare', methods=['POST'])
+    def compare():
+        user0, user1 = sorted(
+            [request.values['user0'], request.values['user1']])
+
+        if user0 == user1:
+            message = "Cannot compare a user to themselves!"
+
+        else:
+            prediction = predict_user(
+                user0, user1, request.values['tweet_text'])
+            message = "'{}' is more likely to be said by {} than {}!".format(request.values['tweet_text'],
+                                                                             user1 if prediction else user0,
+                                                                             user0 if prediction else user1)
+
+        return render_template('prediction.html', title="Prediction", message=message)
+
     return app
+
 
 def get_usernames():
     # get all of the usernames of existing users
